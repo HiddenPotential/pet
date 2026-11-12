@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Teach Your Pet</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🐾 Teach Your Pet</h1>
+    <p class="tagline">The best way to learn something is to teach it.</p>
+    <span id="demo-badge" class="badge hidden">DEMO MODE</span>
+  </header>
+
+  <main>
+    <!-- 1. Setup -->
+    <section id="screen-setup" class="screen">
+      <div class="card">
+        <h2>1. Choose your pet</h2>
+        <div id="pet-picker" class="pet-picker"></div>
+        <label>Pet's name
+          <input id="pet-name" maxlength="20" placeholder="e.g. Biscuit" />
+        </label>
+        <p id="pet-saved" class="muted"></p>
+        <div id="review" class="review hidden"></div>
+      </div>
+      <div class="card">
+        <h2>2. Pick ONE fact to master</h2>
+        <textarea id="fact" rows="3" maxlength="500"
+          placeholder="e.g. Plants make their own food from sunlight, water and carbon dioxide through photosynthesis."></textarea>
+        <div class="chips" id="examples"></div>
+        <button id="btn-start" class="primary">Let's go →</button>
+      </div>
+      <div class="card how">
+        <h2>How it works</h2>
+        <ol>
+          <li><b>Warm-up quiz</b> — see what you know now.</li>
+          <li><b>Teach your pet</b> — it knows nothing! It asks "why?" and "how?" until it gets it.</li>
+          <li><b>Final quiz</b> — new questions. Watch your score go up.</li>
+        </ol>
+        <p class="muted">Scientists call this the <i>protégé effect</i>: explaining something to someone else makes you understand it much better.</p>
+      </div>
+    </section>
+
+    <!-- 2/4. Quiz (used for both warm-up and final) -->
+    <section id="screen-quiz" class="screen hidden">
+      <div class="card">
+        <h2 id="quiz-title">Warm-up quiz</h2>
+        <p id="quiz-sub" class="muted"></p>
+        <form id="quiz-form"></form>
+        <button id="btn-quiz-submit" class="primary">Check my answers</button>
+        <div id="quiz-results" class="hidden"></div>
+        <button id="btn-quiz-next" class="primary hidden"></button>
+      </div>
+    </section>
+
+    <!-- 3. Teach -->
+    <section id="screen-teach" class="screen hidden">
+      <div class="teach-layout">
+        <aside class="card pet-panel">
+          <div class="stage-wrap"><div id="pet-bubble" class="pet-bubble hidden"></div><div id="pet-stage" class="pet-stage" title="Click to pet me!"></div></div>
+          <p class="pet-hint">Click your pet to pet it</p>
+          <div id="speech-waves" class="speech-waves"><i></i><i></i><i></i><i></i><i></i></div>
+          <div id="pet-label" class="pet-label"></div>
+          <div class="mood" id="pet-mood">curious</div>
+          <h3>🧠 Brain power</h3>
+          <div class="meter"><div id="brain-fill"></div></div>
+          <p id="brain-text" class="muted">0%</p>
+          <h3>What it has learned</h3>
+          <ul id="ideas" class="ideas"></ul>
+        </aside>
+        <div class="card chat-panel">
+          <div id="chat" class="chat"></div>
+          <div id="mistake" class="mistake hidden"></div>
+          <div id="coach" class="coach hidden"></div>
+          <div class="voice-bar">
+            <button type="button" id="btn-voice" class="toggle on" title="Pet speaks out loud">🔊 Pet voice: on</button>
+            <button type="button" id="btn-live" class="toggle" title="Talk back and forth, hands-free">🎙️ Live talk: off</button>
+            <span id="listen-status" class="listen-status"></span>
+          </div>
+          <form id="teach-form" class="teach-form">
+            <textarea id="teach-input" rows="2" placeholder="Explain it to your pet… (or press 🎤 and say it)"></textarea>
+            <button type="button" class="mic" id="btn-mic" title="Speak your explanation">🎤</button>
+            <button class="primary" id="btn-send">Teach</button>
+          </form>
+          <div class="teach-actions">
+            <button id="btn-exam" class="secondary" title="Your pet answers questions using only what you taught it">🧪 Test your pet</button>
+            <button id="btn-finish" class="secondary">I'm done teaching → final quiz</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Results -->
+    <section id="screen-results" class="screen hidden">
+      <div class="card results">
+        <div id="result-pet" class="pet-stage big"></div>
+        <h2 id="result-headline"></h2>
+        <div class="scores">
+          <div><span class="label">Warm-up</span><span id="score-pre" class="score"></span></div>
+          <div class="arrow">→</div>
+          <div><span class="label">Final</span><span id="score-post" class="score"></span></div>
+        </div>
+        <p id="result-detail"></p>
+        <div id="report" class="report"></div>
+        <p id="result-xp" class="xp"></p>
+        <button id="btn-again" class="primary">Teach another fact</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="loading" class="loading hidden"><div class="spinner"></div><span id="loading-text">Thinking…</span></div>
+
+  <script src="pets.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
