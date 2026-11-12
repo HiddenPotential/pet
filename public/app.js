@@ -17,6 +17,7 @@ const state = {
   learned: new Set(),
   history: [],
   stats: { mistakes: 0, fixed: 0, petTest: null },
+  review: null, // the saved review record when re-teaching a fact, else null
   anger: 0, // 0 calm … 3 furious; goes up each time you teach something wrong in a row
   quiz: { stage: "pre", questions: [], preScore: 0, postScore: 0, preQuestions: [] },
 };
@@ -85,47 +86,110 @@ const REVIEW_AFTER = [1, 3, 7, 14, 30]; // days until the next review, getting l
 function dueReviews(pet) {
   return (pet?.reviews || []).filter((r) => Date.now() >= r.due).sort((a, b) => a.due - b.due);
 }
-function scheduleReview(pet, title, fact, score) {
+function scheduleReview(pet, { title, fact, keyIdeas, asked }, score) {
   pet.reviews ||= [];
   let r = pet.reviews.find((x) => x.fact === fact);
-  if (!r) pet.reviews.push((r = { title, fact, step: -1 }));
+  if (!r) pet.reviews.push((r = { title, fact, step: -1, count: 0 }));
   // a strong final score moves the next review further away; a weak one brings it back soon
   r.step = score >= 70 ? Math.min(r.step + 1, REVIEW_AFTER.length - 1) : 0;
   r.at = Date.now();
   r.due = Date.now() + REVIEW_AFTER[r.step] * DAY;
+  // keep the same big ideas so a review re-teaches the same thing, and remember the
+  // questions already asked so the next memory check uses new ones
+  r.keyIdeas = keyIdeas;
+  r.asked = [...(r.asked || []), ...asked].slice(-12);
+  r.lastScore = score;
 }
+const inDays = (t) => { const d = Math.max(1, Math.ceil((t - Date.now()) / DAY)); return d === 1 ? "tomorrow" : `in ${d} days`; };
 function renderReview(pet) {
   const due = dueReviews(pet);
   $("review").classList.toggle("hidden", !due.length);
   if (!due.length) return;
   const ago = (t) => { const d = Math.max(1, Math.round((Date.now() - t) / DAY)); return d === 1 ? "yesterday" : `${d} days ago`; };
   $("review").innerHTML = `<b>🔁 ${esc(pet.name)} is starting to forget…</b> Re-teach it to make it stick:` +
-    due.slice(0, 3).map((r, i) => `<button type="button" class="chip review-chip" data-i="${i}">${esc(r.title)} <small>· taught ${ago(r.at)}</small></button>`).join("");
+    due.slice(0, 3).map((r, i) => `<button type="button" class="chip review-chip" data-i="${i}">🔁 ${esc(r.title)} <small>· taught ${ago(r.at)}</small></button>`).join("") +
+    (due.length > 3 ? `<p class="muted">+${due.length - 3} more waiting</p>` : "");
   $("review").onclick = (e) => {
     const b = e.target.closest(".review-chip");
-    if (b) $("fact").value = due[Number(b.dataset.i)].fact;
+    if (b) startReview(due[Number(b.dataset.i)]);
   };
+}
+function nextReview(pet) {
+  return (pet?.reviews || []).filter((r) => r.due > Date.now()).sort((a, b) => a.due - b.due)[0];
+}
+
+// A review re-teaches a fact you taught before: same big ideas, but the pet has forgotten them.
+function startReview(r) {
+  const saved = loadPet();
+  if (!saved) return;
+  state.pet = { ...saved, reviews: saved.reviews || [] }; // keeps coat and anything else saved
+  state.review = r;
+  state.fact = r.fact;
+  withLoading(`${saved.name} is trying to remember…`, async () => {
+    let questions;
+    if (r.keyIdeas?.length) {
+      state.title = r.title;
+      state.keyIdeas = r.keyIdeas;
+      ({ questions } = await api("quiz", { fact: r.fact, keyIdeas: r.keyIdeas, avoid: r.asked || [] }));
+    } else {
+      // reviews saved before big ideas were stored: rebuild them once
+      const data = await api("start", { fact: r.fact });
+      state.title = data.title;
+      state.keyIdeas = data.keyIdeas.slice(0, 5);
+      questions = data.questions;
+    }
+    state.learned = new Set();
+    state.history = [];
+    state.quiz = { stage: "pre", questions: questions.slice(0, 3), preScore: 0, postScore: 0, preQuestions: questions };
+    renderQuiz();
+    show("quiz");
+  });
 }
 
 // ---------- 1. setup ----------
+let coatChoice = {};
+function renderCoats(kind) {
+  const coats = Pets.COATS[kind] || [];
+  const current = coatChoice[kind] || coats[0]?.id;
+  $("coat-picker").innerHTML = coats.map((c) => {
+    const L = { ...Pets.LOOKS[kind], ...c };
+    return `<button type="button" class="coat ${c.id === current ? "selected" : ""}" data-coat="${c.id}" title="${esc(c.name)}">
+      <span class="swatch" style="background:linear-gradient(135deg, ${L.fur} 0 55%, ${L.light} 55% 78%, ${L.dark} 78%)"></span>${esc(c.name)}</button>`;
+  }).join("");
+}
+
 function renderSetup() {
   const saved = loadPet();
   let selected = saved ? PETS.findIndex((p) => p.kind === saved.kind) : 0;
   if (selected < 0) selected = 0;
-  $("pet-picker").innerHTML = PETS.map(
-    (p, i) => `<button type="button" class="pet-option ${i === selected ? "selected" : ""}" data-i="${i}" title="${p.kind}">${Pets.svg(p.kind, { mini: true })}<small>${p.kind}</small></button>`
-  ).join("");
+  // remember a color per animal while choosing
+  coatChoice = { ...(saved?.coat ? { [saved.kind]: saved.coat } : {}) };
+  const drawPicker = () => {
+    $("pet-picker").innerHTML = PETS.map(
+      (p, i) => `<button type="button" class="pet-option ${i === selected ? "selected" : ""}" data-i="${i}" title="${p.kind}">${Pets.svg(p.kind, { mini: true, coat: coatChoice[p.kind] })}<small>${p.kind}</small></button>`
+    ).join("");
+    renderCoats(PETS[selected].kind);
+  };
   $("pet-picker").onclick = (e) => {
     const b = e.target.closest(".pet-option");
     if (!b) return;
-    document.querySelectorAll(".pet-option").forEach((x) => x.classList.remove("selected"));
-    b.classList.add("selected");
+    selected = Number(b.dataset.i);
+    drawPicker();
   };
+  $("coat-picker").onclick = (e) => {
+    const b = e.target.closest(".coat");
+    if (!b) return;
+    coatChoice[PETS[selected].kind] = b.dataset.coat;
+    drawPicker();
+  };
+  drawPicker();
   if (saved) {
     $("pet-name").value = saved.name;
     const streak = currentStreak(saved);
     $("pet-saved").textContent = `${saved.name} is level ${level(saved.xp)} and has learned ${saved.facts.length} fact(s) with you.` +
       (streak ? ` 🔥 ${streak}-day teaching streak!` : "");
+    const next = !dueReviews(saved).length && nextReview(saved);
+    if (next) $("pet-saved").textContent += ` Next review: "${next.title}" ${inDays(next.due)}.`;
     renderReview(saved);
   }
   $("examples").innerHTML = EXAMPLES.map((e) => `<button type="button" class="chip">${esc(e)}</button>`).join("");
@@ -141,9 +205,11 @@ $("btn-start").onclick = () => {
   const pick = PETS[Number(document.querySelector(".pet-option.selected")?.dataset.i || 0)];
   const saved = loadPet();
   const same = saved && saved.name === name && saved.kind === pick.kind;
-  state.pet = { ...pick, name, xp: same ? saved.xp : 0, facts: same ? saved.facts : [], reviews: same ? saved.reviews || [] : [], streak: same ? saved.streak : null };
+  const coat = coatChoice[pick.kind] || Pets.COATS[pick.kind]?.[0]?.id;
+  state.pet = { ...pick, coat, name, xp: same ? saved.xp : 0, facts: same ? saved.facts : [], reviews: same ? saved.reviews || [] : [], streak: same ? saved.streak : null };
   savePet();
   state.fact = fact;
+  state.review = null;
 
   withLoading(`${name} is sniffing out your fact…`, async () => {
     const data = await api("start", { fact });
@@ -160,9 +226,12 @@ $("btn-start").onclick = () => {
 // ---------- 2 & 4. quizzes ----------
 function renderQuiz() {
   const pre = state.quiz.stage === "pre";
-  $("quiz-title").textContent = pre ? "Warm-up quiz" : "Final quiz";
+  const review = !!state.review;
+  $("quiz-title").textContent = pre ? (review ? `🔁 Memory check: ${state.title}` : "Warm-up quiz") : "Final quiz";
   $("quiz-sub").textContent = pre
-    ? "Answer what you can — it's fine not to know yet! This is your starting score."
+    ? review
+      ? "You taught this before. How much do you still remember? Try before peeking at anything!"
+      : "Answer what you can — it's fine not to know yet! This is your starting score."
     : `New questions. Let's see how much teaching ${state.pet.name} taught YOU.`;
   $("quiz-form").innerHTML = state.quiz.questions
     .map((q, i) => `<div class="q"><p>${i + 1}. ${esc(q)}</p><textarea rows="2" data-i="${i}" placeholder="Your answer…"></textarea><div class="q-result hidden" id="qr-${i}"></div></div>`)
@@ -209,7 +278,7 @@ $("btn-quiz-next").onclick = () => {
 // ---------- 3. teaching ----------
 function startTeaching() {
   petCtl?.destroy();
-  petCtl = Pets.mount($("pet-stage"), state.pet.kind);
+  petCtl = Pets.mount($("pet-stage"), state.pet.kind, state.pet.coat);
   $("pet-label").textContent = `${state.pet.name} · Lv ${level(state.pet.xp)}`;
   $("chat").innerHTML = "";
   $("coach").classList.add("hidden");
@@ -221,7 +290,10 @@ function startTeaching() {
   show("teach");
   $("teach-input").focus();
   petCtl.act("jump");
-  petSays(pickFresh("hello", petLines().hello)).then(afterPetTalks);
+  const hello = state.review
+    ? `*scratches head* ${Pets.LOOKS[state.pet.kind]?.sound || "Hi"}! I remember you taught me about "${state.title}"… but it's all fuzzy now. Can you remind me?`
+    : pickFresh("hello", petLines().hello);
+  petSays(hello).then(afterPetTalks);
   resetIdle();
 }
 
@@ -303,6 +375,52 @@ function pickFresh(key, list) {
   lastPicked[key] = i;
   return list[i];
 }
+// ---------- the pet ACTS OUT its *stage directions* instead of writing them ----------
+// "*wags tail* Woof!" → the pet wags its tail and the text just says "Woof!".
+const ACT_RULES = [
+  [/spin|twirl|circle|zoom|whirl|wheel/, "spin"],
+  [/jump|bounce|hop|leap|skid|land|pounce|\bruns?\b|races?/, "jump"],
+  [/flap|\bwings?\b|feather|ruffl|fluff/, "flap"],
+  [/wag|tail|wiggl/, "wag"],
+  [/\bnod/, "nod"],
+  [/shake|hiss|growl|stomp|snap|bare|swat|glare|bristl|puff(s|ed)? up|cross|flatten|lash|roar|howl|bark|angr|furious|rage|grumbl|huff|turns? away|burst|shoots/, "shake"],
+  [/flop|yawn|\broll|sigh|slump|stretch|whine|whimper|collapse|blank|sits/, "flop"],
+  [/\bears?\b|listen|perk|twitch|sniff|peek|\bhears?\b/, "ears"],
+  [/tilt|head|squint|narrow|blink|stare|scratch|think|ponder|adjust|eyebrow|look|pace|slink|tap/, "tilt"],
+  [/purr|happy|grin|smirk|\blick|giggl|smil|spark|glitter|cheek|squeak|beam|rumble|lean|\bhugs?\b|nuzzl|\bpats?\b|shimmer|heart|gulp|chew|munch|stuff/, "happy"],
+];
+const FX_RULES = [
+  [/purr|\blick|heart|love|nuzzl|\bhugs?\b/, "♥"],
+  [/smoke|steam|sigh|puff(?!(s|ed)? up)/, "💨"],
+  [/fire|flame/, "🔥"],
+  [/yawn|\bnap|sleep|snore/, "💤"],
+  [/scratch|blank|confus|puzzl|tilt/, "❓"],
+  [/spark|glitter|shimmer|glow|twinkl/, "✨"],
+];
+function actOut(text) {
+  const actions = [];
+  const clean = text.replace(/\*([^*]+)\*\s*/g, (all, inner) => {
+    const t = inner.toLowerCase();
+    const act = ACT_RULES.find(([re]) => re.test(t))?.[1];
+    const fx = FX_RULES.find(([re]) => re.test(t))?.[1];
+    // a single emphasized word that isn't a movement (like *why*) stays as emphasis
+    if (!act && !fx && !/\s/.test(inner.trim())) return all;
+    actions.push({ act: act || "tilt", fx });
+    return "";
+  }).replace(/\s{2,}/g, " ").trim();
+  return { clean: clean || "…", actions };
+}
+function playActions(actions, ctl = petCtl) {
+  actions.slice(0, 3).forEach(({ act, fx }, i) =>
+    setTimeout(() => {
+      if (!ctl) return;
+      ctl.act(act);
+      if (fx === "♥") ctl.hearts(3);
+      else if (fx) ctl.float(fx);
+    }, i * 1300)
+  );
+}
+
 function bubble(text, ms = 2600) {
   const b = $("pet-bubble");
   b.textContent = text;
@@ -319,8 +437,10 @@ $("pet-stage").addEventListener("click", () => {
   petCtl.el.classList.add("petted");
   setTimeout(() => petCtl?.el.classList.remove("petted"), 1500);
   const line = pickFresh("petLine", petLines()[petCtl.el.classList.contains("mood-angry") ? "grumpy" : "pet"]);
-  bubble(line.replace(/\*/g, ""));
-  if (!speechSynthesis?.speaking) speak(line);
+  const said = actOut(line);
+  playActions(said.actions);
+  bubble(said.clean);
+  if (!window.speechSynthesis?.speaking) speak(said.clean);
   resetIdle();
 });
 
@@ -346,70 +466,133 @@ function resetIdle() {
 function idleNudge() {
   if (!petCtl || $("screen-teach").classList.contains("hidden") || $("btn-send").disabled) return;
   const [act, line] = pickFresh("idle", petLines().idle);
-  petCtl.act(act);
-  bubble(line.replace(/\*[^*]*\*\s*/g, ""), 3500);
+  const said = actOut(line);
+  if (said.actions.length) playActions(said.actions); else petCtl.act(act);
+  bubble(said.clean, 3500);
   resetIdle();
 }
 
 // ---------- live voice: the pet speaks out loud ----------
-// Each pet gets its own voice (higher pitch = smaller pet).
+// Each pet gets its own voice (higher pitch = smaller pet). Pitches stay in a moderate
+// range: very high or very low settings make most browser voices crackle or sound robotic.
 const PET_VOICE = {
-  puppy: { pitch: 1.6, rate: 1.1 },
-  kitten: { pitch: 1.9, rate: 1.05 },
-  "baby dragon": { pitch: 0.7, rate: 0.95 },
-  owl: { pitch: 1.0, rate: 0.9 },
-  hamster: { pitch: 2.0, rate: 1.3 },
-  fox: { pitch: 1.3, rate: 1.05 },
+  puppy: { pitch: 1.35, rate: 1.05 },
+  kitten: { pitch: 1.5, rate: 1.0 },
+  "baby dragon": { pitch: 0.8, rate: 0.95 },
+  owl: { pitch: 0.95, rate: 0.92 },
+  hamster: { pitch: 1.6, rate: 1.15 },
+  fox: { pitch: 1.15, rate: 1.03 },
 };
 const voice = { on: "speechSynthesis" in window, live: false };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const speech = { id: 0, voices: [], current: null };
 
-function pickVoice() {
-  const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
-  return voices.find((v) => /Samantha|Google US English|Aria|Jenny/i.test(v.name)) || voices[0] || null;
+// Voices load in the background in Chrome; keep the list fresh.
+function loadVoices() {
+  speech.voices = speechSynthesis.getVoices();
 }
-if (voice.on) speechSynthesis.onvoiceschanged = () => {}; // makes some browsers load voices early
+if (voice.on) {
+  loadVoices();
+  speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
+}
 
-function speak(text) {
-  const spoken = text
-    // *wags tail* is acted out, not said; a *single* emphasized word is still said
-    .replace(/\*([^*]+)\*/g, (_, inner) => (/\s/.test(inner.trim()) ? "" : inner))
+// Prefer natural-sounding English voices, then common good defaults.
+function pickVoice() {
+  const en = speech.voices.filter((v) => /^en[-_]/i.test(v.lang) || v.lang === "en");
+  return (
+    en.find((v) => /natural|neural|premium|enhanced/i.test(v.name)) ||
+    en.find((v) => /Samantha|Google US English|Aria|Jenny|Karen|Daniel/i.test(v.name)) ||
+    en.find((v) => /en[-_]US/i.test(v.lang) && v.localService) ||
+    en[0] ||
+    null
+  );
+}
+
+// What the pet says out loud: no *actions*, no emoji or symbols, no stray markup.
+function forSpeech(text) {
+  return text
+    .replace(/\*([^*]+)\*/g, (_, inner) => (/\s/.test(inner.trim()) ? "" : inner)) // *wags tail* is acted, *why* is said
+    .replace(/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u200D\uFE0F]/gu, "")
+    .replace(/[_~`#<>|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (!voice.on || !spoken) return Promise.resolve();
-  speechSynthesis.cancel();
+}
+
+// Chrome stops long utterances after ~15 seconds, so speak one sentence at a time.
+function sentences(text) {
+  const parts = text.match(/[^.!?…]+[.!?…]*["')\]]*\s*/g) || [text];
+  const out = [];
+  for (const p of parts.map((x) => x.trim()).filter((x) => /[\p{L}\p{N}]/u.test(x))) { // skip bits like "…"
+    if (out.length && (out[out.length - 1] + " " + p).length < 120) out[out.length - 1] += " " + p;
+    else out.push(p);
+  }
+  return out;
+}
+
+function setTalking(on) {
+  petCtl?.talking(on);
+  $("speech-waves")?.classList.toggle("on", on);
+}
+
+function stopSpeaking() {
+  speech.id++;
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  setTalking(false);
+}
+
+function sayChunk(text, settings, id) {
   return new Promise((resolve) => {
-    const u = new SpeechSynthesisUtterance(spoken);
-    const v = PET_VOICE[state.pet.kind] || { pitch: 1.4, rate: 1 };
-    const mad = petCtl?.el.classList.contains("mood-angry") ? Math.max(1, state.anger) : 0;
-    // an angry pet talks lower and faster, more so the madder it gets
-    u.pitch = Math.max(0.1, Math.min(2, v.pitch - mad * 0.15 + (Math.random() - 0.5) * 0.2)); // a little different every time
-    u.rate = v.rate + mad * 0.08 + (Math.random() - 0.5) * 0.1;
-    u.voice = pickVoice();
+    if (id !== speech.id) return resolve();
+    const u = new SpeechSynthesisUtterance(text);
+    speech.current = u; // keep a reference, or Chrome may garbage-collect it and never fire onend
+    Object.assign(u, settings);
     let finished = false;
     const done = () => {
       if (finished) return;
       finished = true;
-      petCtl?.talking(false);
-      $("speech-waves").classList.remove("on");
+      clearTimeout(timer);
       resolve();
     };
-    u.onstart = () => {
-      petCtl?.talking(true);
-      $("speech-waves").classList.add("on");
-    };
+    u.onstart = () => id === speech.id && setTalking(true);
     u.onend = done;
-    u.onerror = done;
-    setTimeout(done, 2000 + spoken.length * 90); // safety net if the browser never fires onend
+    u.onerror = done; // "interrupted"/"canceled" when a new line starts: fine
+    // Safety net in case the browser never fires onend (estimated from length and speed).
+    const timer = setTimeout(done, 3000 + (text.length * 85) / (settings.rate || 1));
     speechSynthesis.speak(u);
   });
+}
+
+async function speak(text) {
+  const spoken = forSpeech(text);
+  if (!voice.on || !spoken) return;
+  const id = ++speech.id;
+  speechSynthesis.cancel();
+  await sleep(80); // Chrome sometimes drops a line spoken right after cancel()
+  if (id !== speech.id) return;
+  speechSynthesis.resume(); // Chrome can get stuck "paused" after the tab was idle
+  if (!speech.voices.length) loadVoices();
+  const v = PET_VOICE[state.pet.kind] || { pitch: 1.2, rate: 1 };
+  const mad = petCtl?.el.classList.contains("mood-angry") ? Math.max(1, state.anger) : 0;
+  // an angry pet talks a bit lower and faster, more so the madder it gets
+  const settings = {
+    voice: pickVoice(),
+    lang: pickVoice()?.lang || "en-US",
+    pitch: Math.max(0.5, Math.min(1.8, v.pitch - mad * 0.1 + (Math.random() - 0.5) * 0.08)),
+    rate: Math.max(0.7, Math.min(1.4, v.rate + mad * 0.06 + (Math.random() - 0.5) * 0.06)),
+    volume: 1,
+  };
+  for (const chunk of sentences(spoken)) {
+    if (id !== speech.id) return;
+    await sayChunk(chunk, settings, id);
+  }
+  if (id === speech.id) setTalking(false);
 }
 
 // ---------- the pet "texts" you: typing dots, then a typewriter reveal ----------
 function showTyping() {
   $("chat").insertAdjacentHTML(
     "beforeend",
-    `<div class="msg pet" id="typing"><span class="msg-avatar">${Pets.svg(state.pet.kind, { mini: true })}</span><b>${esc(state.pet.name)} is typing…</b><span class="typing"><span></span><span></span><span></span></span></div>`
+    `<div class="msg pet" id="typing"><span class="msg-avatar">${Pets.svg(state.pet.kind, { mini: true, coat: state.pet.coat })}</span><b>${esc(state.pet.name)} is typing…</b><span class="typing"><span></span><span></span><span></span></span></div>`
   );
   $("chat").scrollTop = $("chat").scrollHeight;
 }
@@ -417,11 +600,14 @@ function hideTyping() {
   $("typing")?.remove();
 }
 
-async function petSays(text) {
+async function petSays(raw) {
   hideTyping();
+  // movements are acted out by the pet, not written in the chat
+  const { clean: text, actions } = actOut(raw);
+  playActions(actions);
   const msg = document.createElement("div");
   msg.className = "msg pet";
-  msg.innerHTML = `<span class="msg-avatar">${Pets.svg(state.pet.kind, { mini: true })}</span><b>${esc(state.pet.name)}<button type="button" class="replay" title="Hear it again">🔊</button></b><span class="body caret"></span>`;
+  msg.innerHTML = `<span class="msg-avatar">${Pets.svg(state.pet.kind, { mini: true, coat: state.pet.coat })}</span><b>${esc(state.pet.name)}<button type="button" class="replay" title="Hear it again">🔊</button></b><span class="body caret"></span>`;
   msg.querySelector(".replay").onclick = () => speak(text);
   $("chat").appendChild(msg);
   const body = msg.querySelector(".body");
@@ -439,6 +625,21 @@ async function petSays(text) {
 function addTeacherMsg(text) {
   $("chat").insertAdjacentHTML("beforeend", `<div class="msg teacher">${esc(text)}</div>`);
   $("chat").scrollTop = $("chat").scrollHeight;
+  return $("chat").lastElementChild;
+}
+
+// Autocorrect: swap typos in your chat bubble for the right spelling (underlined,
+// hover to see what you typed) and add a small note so you learn the spelling too.
+function showSpellingFixes(bubble, corrected, fixes) {
+  if (!bubble || !fixes?.length) return;
+  let html = esc(corrected);
+  for (const { from, to } of fixes) {
+    const re = new RegExp(`(?<![\\p{L}'])(${to})(?![\\p{L}'])`, "giu");
+    html = html.replace(re, `<span class="fixed" title="You typed: ${esc(from)}">$1</span>`);
+  }
+  bubble.innerHTML = html;
+  const note = fixes.map((f) => `<s>${esc(f.from)}</s> → <b>${esc(f.to)}</b>`).join(", ");
+  bubble.insertAdjacentHTML("afterend", `<div class="spell-note">${esc(state.pet.name)} fixed your spelling: ${note}</div>`);
 }
 function setMood(mood) {
   petCtl?.setMood(mood);
@@ -452,7 +653,9 @@ function renderBrain() {
   $("brain-fill").style.width = `${pct}%`;
   $("brain-text").textContent = `${pct}% — ${state.learned.size} of ${state.keyIdeas.length} big ideas`;
   $("ideas").innerHTML = state.keyIdeas
-    .map((k, i) => (state.learned.has(i) ? `<li class="learned">✅ ${esc(k)}</li>` : `<li>🔒 Big idea #${i + 1} — not taught yet</li>`))
+    .map((k, i) => (state.learned.has(i)
+      ? `<li class="learned">✅ ${esc(k)}</li>`
+      : state.review ? `<li>💭 Big idea #${i + 1} — forgotten, re-teach it</li>` : `<li>🔒 Big idea #${i + 1} — not taught yet</li>`))
     .join("");
 }
 
@@ -462,7 +665,7 @@ $("teach-form").onsubmit = async (e) => {
   if (!message || $("btn-send").disabled) return;
   stopListening();
   $("teach-input").value = "";
-  addTeacherMsg(message);
+  const myBubble = addTeacherMsg(message);
   $("btn-send").disabled = true;
   setMood("thinking");
   showTyping();
@@ -481,7 +684,8 @@ $("teach-form").onsubmit = async (e) => {
     state.anger = data.mood === "angry" ? Math.min(3, state.anger + 1) : data.trickAttempt || data.mood === "confused" ? state.anger : 0;
     if (data.mood === "angry") state.stats.mistakes++;
     if (wasAngry && !state.anger) { petCtl?.hearts(1); state.stats.fixed++; }
-    state.history.push({ role: "teacher", text: message }, { role: "pet", text: data.petReply, move: data.move });
+    showSpellingFixes(myBubble, data.correctedMessage, data.spellingFixes);
+    state.history.push({ role: "teacher", text: data.correctedMessage || message }, { role: "pet", text: data.petReply, move: data.move });
     const before = state.learned.size;
     // The server decides what's unlocked: wrong ideas get re-locked, tricks unlock nothing.
     state.learned = new Set(data.learnedIdeas.filter((i) => i >= 0 && i < state.keyIdeas.length));
@@ -525,7 +729,7 @@ let listenCancelled = false;
 
 function listen() {
   if (!Recognition || rec) return;
-  speechSynthesis?.cancel(); // don't let the pet hear itself
+  stopSpeaking(); // don't let the pet hear itself
   listenCancelled = false;
   rec = new Recognition();
   rec.lang = "en-US";
@@ -576,7 +780,7 @@ function renderVoiceButtons() {
 }
 $("btn-voice").onclick = () => {
   voice.on = !voice.on && "speechSynthesis" in window;
-  if (!voice.on) speechSynthesis?.cancel();
+  if (!voice.on) stopSpeaking();
   renderVoiceButtons();
 };
 $("btn-mic").onclick = () => (rec ? stopListening() : listen());
@@ -598,7 +802,7 @@ renderVoiceButtons();
 
 $("btn-finish").onclick = () => {
   stopListening();
-  speechSynthesis?.cancel();
+  stopSpeaking();
   if (state.learned.size < state.keyIdeas.length &&
       !confirm(`${state.pet.name} still has locked ideas. Go to the final quiz anyway?`)) return;
   withLoading("Writing your final quiz…", async () => {
@@ -614,22 +818,27 @@ $("btn-finish").onclick = () => {
 function showResults() {
   const { preScore, postScore } = state.quiz;
   const gain = postScore - preScore;
-  const xpGained = 20 * state.learned.size + Math.max(0, gain) + 10;
+  const review = !!state.review;
+  const xpGained = 20 * state.learned.size + Math.max(0, gain) + 10 + (review ? 15 : 0);
   const oldLevel = level(state.pet.xp);
   state.pet.xp += xpGained;
   if (!state.pet.facts.includes(state.title)) state.pet.facts.push(state.title);
-  scheduleReview(state.pet, state.title, state.fact, postScore);
+  const asked = [...state.quiz.preQuestions.slice(0, 3), ...state.quiz.questions];
+  scheduleReview(state.pet, { title: state.title, fact: state.fact, keyIdeas: state.keyIdeas, asked }, postScore);
+  if (review) state.pet.reviews.find((r) => r.fact === state.fact).count++;
   bumpStreak(state.pet);
   savePet();
   renderReport();
 
-  const winner = Pets.mount($("result-pet"), state.pet.kind);
+  const winner = Pets.mount($("result-pet"), state.pet.kind, state.pet.coat);
   winner.setMood(postScore >= preScore ? "proud" : "curious");
   setTimeout(() => { winner.act("spin"); winner.hearts(5); }, 300);
   $("score-pre").textContent = `${preScore}%`;
   $("score-post").textContent = `${postScore}%`;
-  $("result-headline").textContent =
-    gain > 0 ? `You improved by ${gain} points! 🎉` : gain === 0 ? "Same score — try teaching more of the big ideas!" : "Tricky one! Teach it again to lock it in.";
+  $("result-headline").textContent = review
+    ? postScore >= 70 ? `Review done — it's sticking! 🧠` : "Still a bit fuzzy — we'll review it again soon."
+    : gain > 0 ? `You improved by ${gain} points! 🎉` : gain === 0 ? "Same score — try teaching more of the big ideas!" : "Tricky one! Teach it again to lock it in.";
+  document.querySelector("#screen-results .scores .label").textContent = review ? "Memory check" : "Warm-up";
   $("result-detail").textContent =
     `You taught ${state.pet.name} ${state.learned.size} of ${state.keyIdeas.length} big ideas about "${state.title}" in ${state.history.length / 2} explanations.`;
   const newLevel = level(state.pet.xp);
@@ -649,10 +858,11 @@ function renderReport() {
     ["🧪", `${n}'s test`, petTest ? `${petTest.right} / ${petTest.total} right` : "not taken — try it next time", petTest && petTest.right === petTest.total],
     ["🔥", "Teaching streak", `${currentStreak(state.pet)} day(s)`, true],
   ];
-  const next = dueReviews(state.pet).length ? "" : state.pet.reviews?.find((r) => r.fact === state.fact);
+  const next = state.pet.reviews?.find((r) => r.fact === state.fact);
+  if (next?.count) rows.push(["🔁", "Times reviewed", `${next.count}`, true]);
   $("report").innerHTML = `<h3>Teaching report card</h3>` +
     rows.map(([icon, label, val, good]) => `<div class="report-row ${good ? "good" : ""}"><span>${icon} ${esc(label)}</span><b>${esc(val)}</b></div>`).join("") +
-    (next ? `<p class="muted">🔁 ${esc(n)} will need a refresher on this in ${Math.round((next.due - Date.now()) / DAY)} day(s). Come back and re-teach it to make it stick.</p>` : "");
+    (next ? `<p class="muted">🔁 ${esc(n)} will need a refresher on this ${inDays(next.due)}. Come back and re-teach it to make it stick.</p>` : "");
 }
 
 // ---------- "Test your pet": it answers using only what you taught ----------
@@ -681,7 +891,7 @@ $("btn-exam").onclick = async () => {
       <b>🧪 ${esc(n)} takes a test — using only what you taught</b>
       ${results.map((r) => `<div class="exam-q ${r.correct ? "ok" : "bad"}">
         <div class="q-line">${r.correct ? "✅" : "❌"} ${esc(r.question)}</div>
-        <div class="a-line">${esc(n)}: ${fmt(r.petAnswer)}</div>
+        <div class="a-line">${esc(n)}: ${fmt(actOut(r.petAnswer).clean)}</div>
         ${r.gap ? `<div class="gap">👉 ${esc(r.gap)}</div>` : ""}</div>`).join("")}
       <div class="exam-score">${esc(n)} got <b>${right} / ${results.length}</b> right.${all ? " You taught it everything! 🎉" : " Its mistakes show what to teach next."}</div>
     </div>`);
@@ -697,6 +907,7 @@ $("btn-exam").onclick = async () => {
 
 $("btn-again").onclick = () => {
   $("fact").value = "";
+  state.review = null;
   renderSetup();
   show("setup");
 };

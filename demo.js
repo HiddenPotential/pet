@@ -304,3 +304,52 @@ export async function exam({ keyIdeas, pet, history = [], learned = [] }) {
     }),
   };
 }
+
+// ---------- Demo autocorrect (the real app lets Claude find typos) ----------
+// Fixes common misspellings, plus typos of words from your fact ("photosinthesis" → "photosynthesis").
+const MISSPELLED = {
+  teh: "the", becuase: "because", becasue: "because", beacuse: "because", bcause: "because", cuz: "because",
+  recieve: "receive", beleive: "believe", definately: "definitely", wierd: "weird", thier: "their",
+  freind: "friend", untill: "until", alot: "a lot", wich: "which", whitch: "which", wen: "when",
+  becaus: "because", happend: "happened", diffrent: "different", enviroment: "environment",
+  goverment: "government", tommorow: "tomorrow", probly: "probably", realy: "really", gona: "gonna",
+  thru: "through", tho: "though", dosent: "doesn't", doesnt: "doesn't", dont: "don't", cant: "can't",
+  isnt: "isn't", wont: "won't", didnt: "didn't", its: "it's", thats: "that's", whats: "what's",
+  becomse: "becomes", sunlite: "sunlight", wather: "water", energie: "energy", oxigen: "oxygen",
+};
+const COMMON = new Set(`about after again also always another answer around asked away back because been before being below between both bring came come could does doing done down during each earth even every example explain fast feel find first from give going good great happen happens have help here high into just keep kind know large last learn left like little live long look made make many maybe means might more most much must need never next nothing number often only other over part people place plant plants point really right same says should show side small some something sometimes start still such take tell than thank that their them then there these they thing things think this those through time together turn under until very want warm water well went were what when where which while will with without word words work would year your`.split(" "));
+
+const SHORT_WORDS = new Set("all and any are big but can day did for get got had has her him his how its let man new not now off old one our out own put ran run saw say see she sun the too two use was way who why yes yet you air hot top".split(" "));
+// "plant" vs "plants" or "warm" vs "warmer" are different words, not typos.
+const isForm = (a, b) => [a, b].some((x, i) => { const y = i ? a : b; return y.startsWith(x) && /^(s|es|ed|d|ing|er|est|ly)$/.test(y.slice(x.length)); });
+
+function distance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+export function spellFix(message, vocabText = "") {
+  const vocab = [...new Set((vocabText.toLowerCase().match(/[a-z]+/g) || []).filter((w) => w.length >= 4))];
+  const fixes = [];
+  const seen = new Set();
+  for (const raw of message.match(/[A-Za-z']+/g) || []) {
+    const w = raw.toLowerCase();
+    if (seen.has(w)) continue;
+    seen.add(w);
+    if (MISSPELLED[w] && !MISSPELLED[w].includes(" ")) { fixes.push({ from: raw, to: MISSPELLED[w] }); continue; }
+    if (w.length < 3 || COMMON.has(w) || SHORT_WORDS.has(w) || vocab.includes(w)) continue;
+    let best = null, bestD = 99;
+    for (const v of vocab) {
+      if (isForm(w, v)) continue;
+      if (w.length === 3 && w[0] !== v[0]) continue; // be careful with tiny words
+      const d = distance(w, v);
+      if (d < bestD) { best = v; bestD = d; }
+    }
+    if (best && bestD <= (w.length >= 7 ? 2 : 1)) fixes.push({ from: raw, to: best });
+  }
+  return fixes;
+}

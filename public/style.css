@@ -183,6 +183,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .pet-svg .brow { transform-box: fill-box; transform-origin: center; transition: transform .25s; opacity: 0; }
 .pet-svg .blush { fill: #d9707f; opacity: 0; transition: opacity .3s; }
 .pet-svg .heart { fill: #ff6b8b; animation: floatUp 1.5s ease-out forwards; opacity: 0; }
+.pet-svg .fx-float { font-size: 22px; text-anchor: middle; animation: floatUp 1.6s ease-out forwards; opacity: 0; transform-box: fill-box; }
 
 /* mouths */
 .pet-svg .mouth-flat, .pet-svg .mouth-open { display: none; }
@@ -315,3 +316,17 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .report-row.good { background: #e6f7ee; }
 .review { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #fff6e0; font-size: .9rem; }
 .review .chip { display: inline-block; margin: 6px 6px 0 0; }
+
+/* ---------- color options for each animal ---------- */
+.coat-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.coat-label { font-weight: 700; font-size: .9rem; }
+.coat-picker { display: flex; gap: 8px; flex-wrap: wrap; }
+.coat { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 5px 5px; border-radius: 999px;
+  background: var(--soft); color: var(--ink); font-size: .8rem; font-weight: 600; border: 2px solid transparent; }
+.coat.selected { border-color: var(--accent); background: #fff; }
+.coat .swatch { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+
+/* Autocorrect */
+.msg.teacher .fixed { text-decoration: underline wavy rgba(255, 255, 255, .8); text-underline-offset: 3px; cursor: help; }
+.spell-note { margin: -4px 0 6px auto; max-width: 82%; width: fit-content; font-size: .76rem; color: var(--muted); text-align: right; }
+.spell-note s { opacity: .7; }

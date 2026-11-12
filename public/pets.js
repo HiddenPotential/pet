@@ -1,5 +1,5 @@
 // Hand-drawn SVG pets with moving parts (eyes, lids, mouth, ears, tail, wings).
-// Pets.svg(kind) returns the drawing; Pets.mount(el, kind) brings one to life:
+// Pets.svg(kind, {coat}) returns the drawing; Pets.mount(el, kind, coat) brings one to life:
 // blinking, breathing, eyes that follow your cursor, moods, actions, talking and petting.
 
 (() => {
@@ -12,6 +12,55 @@
     hamster: { fur: "#eab27c", dark: "#b07a45", light: "#fff4e6", inner: "#f2b5c1", ears: "round", nose: "#b8737a", cheeks: true, sound: "Squeak" },
     fox: { fur: "#ef7d3a", dark: "#3b2a20", light: "#fff3e6", inner: "#2b1f18", ears: "pointy", tail: "bushy", nose: "#1f1611", muzzle: true, sound: "Yip" },
   };
+  // Color options for each animal. The first one is the classic look above;
+  // the others only change colors (fur, shading, belly, inner ears, eyes, nose).
+  const COATS = {
+    puppy: [
+      { id: "golden", name: "Golden" },
+      { id: "chocolate", name: "Chocolate", fur: "#6b4429", dark: "#3a2315", light: "#b48a66", iris: "#c98a3a" },
+      { id: "black", name: "Black & tan", fur: "#2f2b29", dark: "#141211", light: "#c48a4f", nose: "#0e0c0b", iris: "#8a5a2a" },
+      { id: "cream", name: "Cream", fur: "#e6d3b3", dark: "#a2855c", light: "#f8f0e3" },
+      { id: "gray", name: "Silver", fur: "#8d9095", dark: "#45484d", light: "#dcdde0", iris: "#4f7fa8" },
+    ],
+    kitten: [
+      { id: "blue", name: "Blue gray" },
+      { id: "ginger", name: "Ginger", fur: "#d98a3d", dark: "#844a1a", light: "#f3dcc0", inner: "#e0a5a0", iris: "#7fa63a" },
+      { id: "black", name: "Black", fur: "#2c2b30", dark: "#0f0e11", light: "#4a4850", inner: "#8f6b74", iris: "#e0b83a", nose: "#5e4a50" },
+      { id: "siamese", name: "Siamese", fur: "#e9dcc8", dark: "#4a3a30", light: "#f7f0e4", inner: "#c9a29a", iris: "#5b8fd6" },
+      { id: "tabby", name: "Brown tabby", fur: "#8b7458", dark: "#3f3121", light: "#e3d6c2", inner: "#c9a29a", iris: "#9bb23a" },
+    ],
+    "baby dragon": [
+      { id: "forest", name: "Forest" },
+      { id: "ruby", name: "Ruby", fur: "#b33a3a", dark: "#5e1719", light: "#f0c7a8", iris: "#f2c94c" },
+      { id: "sapphire", name: "Sapphire", fur: "#3a63b3", dark: "#1a2f63", light: "#bcd3f0", iris: "#f0b43a" },
+      { id: "amethyst", name: "Amethyst", fur: "#7b4fa6", dark: "#3d2257", light: "#d8c4ec", iris: "#8fe0a0" },
+      { id: "gold", name: "Gold", fur: "#d1a23a", dark: "#6e4f14", light: "#f4e2b0", iris: "#b33a3a" },
+    ],
+    owl: [
+      { id: "barn", name: "Brown" },
+      { id: "snowy", name: "Snowy", fur: "#e8e6e0", dark: "#8a877f", light: "#fbfaf7", iris: "#f0c419" },
+      { id: "gray", name: "Gray", fur: "#77736b", dark: "#36332e", light: "#cfcac0", iris: "#f0a020" },
+      { id: "tawny", name: "Tawny", fur: "#a5552e", dark: "#552612", light: "#edd1b4", iris: "#1f1612" },
+    ],
+    hamster: [
+      { id: "golden", name: "Golden" },
+      { id: "white", name: "White", fur: "#f1ece4", dark: "#b3a593", light: "#fdfbf7", iris: "#8b1e2b" },
+      { id: "gray", name: "Gray", fur: "#9b958c", dark: "#57524b", light: "#e6e2db" },
+      { id: "chocolate", name: "Chocolate", fur: "#7a5236", dark: "#3f2617", light: "#e8d4bf" },
+    ],
+    fox: [
+      { id: "red", name: "Red" },
+      { id: "arctic", name: "Arctic", fur: "#e9edf0", dark: "#76808a", light: "#ffffff", inner: "#a9b2ba", iris: "#c08a2a", nose: "#2b2b2b" },
+      { id: "silver", name: "Silver", fur: "#4d4d55", dark: "#1a1a1f", light: "#d9d9de", inner: "#1a1a1f", iris: "#e0a02a" },
+      { id: "fennec", name: "Fennec", fur: "#e0b77c", dark: "#6e4f2a", light: "#f8ead2", inner: "#f0c8b0" },
+    ],
+  };
+  // The look for one animal in one color (unknown coat → the classic look).
+  function look(kind, coat) {
+    const base = LOOKS[kind] || LOOKS.puppy;
+    const c = (COATS[kind] || []).find((x) => x.id === coat);
+    return c ? { ...base, ...c } : base;
+  }
   let uid = 0;
 
   function ears(L) {
@@ -96,8 +145,8 @@
     return disk + muzzle + cheeks + blush + eye(`${p}l`, 80, 88, R, L) + eye(`${p}r`, 120, 88, R, L) + brows + nose + whiskers + mouth;
   }
 
-  function svg(kind, { mini = false } = {}) {
-    const L = LOOKS[kind] || LOOKS.puppy;
+  function svg(kind, { mini = false, coat } = {}) {
+    const L = look(kind, coat);
     const p = `pet${uid++}`;
     const wings = L.wings
       ? `<g class="wing wing-l" style="transform-origin:66px 136px"><polygon points="66,132 22,98 30,128 18,140 58,152" fill="${L.dark}"/></g>
@@ -132,8 +181,8 @@
 
   const HEART = "M0 -4 C -4 -10 -12 -6 -10 0 C -8 5 0 9 0 12 C 0 9 8 5 10 0 C 12 -6 4 -10 0 -4 Z";
 
-  function mount(el, kind) {
-    el.innerHTML = svg(kind);
+  function mount(el, kind, coat) {
+    el.innerHTML = svg(kind, { coat });
     const root = el.querySelector(".pet-svg");
     const eyes = [...root.querySelectorAll(".eye")];
     const R = 7; // how far (in drawing units) the eyes can shift toward the cursor
@@ -202,6 +251,20 @@
           setTimeout(() => h.remove(), 1600 + i * 150);
         }
       },
+      // float a little symbol (💨 smoke, 🔥 fire, 💤 sleepy, ❓ puzzled, ✨ sparkle) up from the pet
+      float(symbol, n = 2) {
+        const fx = root.querySelector(".fx");
+        for (let i = 0; i < n; i++) {
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", 60 + Math.random() * 80);
+          t.setAttribute("y", 50 + Math.random() * 30);
+          t.setAttribute("class", "fx-float");
+          t.setAttribute("style", `animation-delay:${i * 0.2}s`);
+          t.textContent = symbol;
+          fx.appendChild(t);
+          setTimeout(() => t.remove(), 1700 + i * 200);
+        }
+      },
       destroy() {
         alive = false;
         window.removeEventListener("pointermove", onMove);
@@ -210,5 +273,5 @@
     return ctl;
   }
 
-  window.Pets = { svg, mount, LOOKS };
+  window.Pets = { svg, mount, LOOKS, COATS };
 })();
